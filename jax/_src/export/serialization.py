@@ -295,13 +295,13 @@ def _deserialize_exported(exp: ser_flatbuf.Exported) -> _export.Exported:
                                                    unique_named_shardings)
 
   fun_name = exp.FunctionName().decode("utf-8")
-  in_tree = tree_util.tree_structure(
+  in_tree = tree_util.FlatTree.flatten(
       _deserialize_pytreedef_to_pytree(exp.InTree())
-  )
+  ).tree
 
-  out_tree = tree_util.tree_structure(
+  out_tree = tree_util.FlatTree.flatten(
       _deserialize_pytreedef_to_pytree(exp.OutTree())
-  )
+  ).tree
 
   # TODO(necula): remove the fallback to NrDevicesShort and mark
   # the field "deprecated" once we abandon the old

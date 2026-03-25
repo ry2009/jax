@@ -18,29 +18,38 @@ from dataclasses import dataclass
 from functools import partial, update_wrapper
 import inspect
 import itertools as it
-from typing import Any, Hashable, Callable
+from typing import Any, Callable, Hashable
 
+from jax._src import ad_util
 from jax._src import api
 from jax._src import config
 from jax._src import core
 from jax._src import dtypes
 from jax._src import effects
-from jax._src.api_util import resolve_kwargs, infer_argnums_and_argnames
+from jax._src.api_util import infer_argnums_and_argnames, resolve_kwargs
 from jax._src.core import typeof
+from jax._src.custom_derivatives import (
+    CustomVJPPrimal, _check_for_returned_refs, _temporary_dtype_exception)
+from jax._src.errors import UnexpectedTracerError
 from jax._src.interpreters import ad
 from jax._src.interpreters import batching
 from jax._src.interpreters import partial_eval as pe
 from jax._src.interpreters import remat
-from jax._src.custom_derivatives import (
-    CustomVJPPrimal, _temporary_dtype_exception, _check_for_returned_refs)
-from jax._src.errors import UnexpectedTracerError
 from jax._src.state.types import AbstractRef
-from jax._src import ad_util
-from jax._src.util import safe_zip, safe_map, split_list, unzip2
 from jax._src.tree_util import (
-    tree_map, tree_flatten, tree_unflatten, tree_leaves, tree_leaves_checked,
-    broadcast_prefix, register_static, tree_structure, tree_map_with_path,
-    keystr)
+    FlatTree,
+    broadcast_prefix,
+    keystr,
+    register_static,
+    tree_flatten,
+    tree_leaves,
+    tree_leaves_checked,
+    tree_map,
+    tree_map_with_path,
+    tree_unflatten,
+)
+from jax._src.util import safe_map, safe_zip, split_list, unzip2
+
 map, unsafe_map = safe_map, map
 zip, unsafe_zip = safe_zip, zip
 
@@ -385,8 +394,10 @@ class VJPHiPrimitive:
         type(self).vjp_bwd_retval is not VJPHiPrimitive.vjp_bwd_retval):
       raise AttributeError(f"subclass {type(self)} should not override both "
                            "`vjp_bwd` and `vjp_bwd_retval`")
-    self.in_avals_flat, self.in_tree = tree_flatten(self.in_avals)
-    self.out_avals_flat, self.out_tree = tree_flatten(self.out_aval)
+    in_avals_ft = FlatTree.flatten(self.in_avals)
+    self.in_avals_flat, self.in_tree = in_avals_ft.vals, in_avals_ft.tree
+    out_avals_ft = FlatTree.flatten(self.out_aval)
+    self.out_avals_flat, self.out_tree = out_avals_ft.vals, out_avals_ft.tree
     self.__dict__.update(self.params)
     self.check(*self.in_avals)
 
@@ -700,7 +711,7 @@ class CustomVJPTraced(VJPHiPrimitive):
     if config.mutable_array_checks.value:
       _check_for_returned_refs(self.fwd, (out, res), "fwd", tree_leaves(args),
                                self.out_tree.num_leaves)
-    if ((tree := tree_structure(out)) != self.out_tree):
+    if (tree := FlatTree.flatten(out).tree) != self.out_tree:
       raise TypeError(_vjp_primal_fwd_tree_mismatch_err(self, tree))
     tree_map_with_path(_vjp_fwd_aval_mismatch_err, self.out_aval, out)
     if self.symbolic_zeros:

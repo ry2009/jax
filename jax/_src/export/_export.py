@@ -1442,7 +1442,8 @@ def call(exported: Exported) -> Callable[..., typing.Array]:
 
   def f_imported(*args, **kwargs):
     # since custom_vjp does not support kwargs, flatten the function first.
-    args_flat, in_tree = tree_util.tree_flatten((args, kwargs))
+    args_ft = tree_util.FlatTree.flatten((args, kwargs))
+    args_flat, in_tree = args_ft.vals, args_ft.tree
     if in_tree != exported.in_tree:
       # Give errors with the precise tree difference; use fake leaves so we can
       # use tree_util.equality_errors.

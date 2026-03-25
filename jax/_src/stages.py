@@ -30,29 +30,29 @@ executable protocols described above.
 """
 from __future__ import annotations
 
-import dataclasses
-import enum
 from collections.abc import Sequence
+import dataclasses
 from dataclasses import dataclass
+import enum
 import itertools as it
 from typing import Any, NamedTuple, Protocol, Union, runtime_checkable
 
-from jax._src import core
 from jax._src import config
+from jax._src import core
 from jax._src import sharding as sharding_lib
 from jax._src import source_info_util
 from jax._src import traceback_util
 from jax._src import tree_util
 from jax._src import util
-from jax._src.typing import ArrayLike
+from jax._src.core import typeof
 from jax._src.interpreters import mlir
-from jax._src.layout import Format, Layout, AutoLayout
-from jax._src.sharding_impls import UnspecifiedValue, AUTO
-from jax._src.lib.mlir import ir
+from jax._src.layout import AutoLayout, Format, Layout
 from jax._src.lib import _jax
 from jax._src.lib import xla_client as xc
-from jax._src.tree_util import tree_structure, tree_unflatten
-from jax._src.core import typeof
+from jax._src.lib.mlir import ir
+from jax._src.sharding_impls import AUTO, UnspecifiedValue
+from jax._src.tree_util import tree_unflatten
+from jax._src.typing import ArrayLike
 
 source_info_util.register_exclusion(__file__)
 traceback_util.register_exclusion(__file__)
@@ -335,7 +335,7 @@ class Stage:
   @property
   def in_tree(self) -> tree_util.PyTreeDef:
     """Tree structure of the pair (positional arguments, keyword arguments)."""
-    return tree_structure(self.args_info)
+    return tree_util.FlatTree.flatten(self.args_info).tree
 
   @property
   def in_avals(self):
@@ -505,7 +505,7 @@ def lojax_expand_params(jaxpr, params):
 
 def lojax_pytree(hi_avals, tree):
   lo_avals = [t.lo_ty() for t in hi_avals]
-  return tree_structure(tree_unflatten(tree, lo_avals))
+  return tree_util.FlatTree.flatten(tree_unflatten(tree, lo_avals)).tree
 
 
 class LoJax:
@@ -820,17 +820,25 @@ class Compiled(Stage):
           f"keyword arguments, but called with keyword arguments: {kws}")
 
     if params.is_high:
-      hi_args_flat, in_hi_tree = tree_util.tree_flatten((args, kwargs))
+      hi_args_ft = tree_util.FlatTree.flatten((args, kwargs))
+      hi_args_flat, hi_tree = hi_args_ft.vals, hi_args_ft.tree
       _in_hi_tree, final_qdds = params.in_types
       # TODO(jakevdp): remove pyrefly ignore when https://github.com/facebook/pyrefly/issues/2382 is fixed.
-      args_flat = [a.read_loval(core.cur_qdd(x), x) if (a := typeof(x)).has_qdd
-                  else a.lower_val(x) for x in hi_args_flat]
-      args_flat, in_tree = \
-          tree_util.tree_flatten(tree_util.tree_unflatten(in_hi_tree, args_flat))
+      args_flat = [
+          a.read_loval(core.cur_qdd(x), x)
+          if (a := typeof(x)).has_qdd
+          else a.lower_val(x)
+          for x in hi_args_flat
+      ]
+      args_ft = tree_util.FlatTree.flatten(
+          tree_util.tree_unflatten(hi_tree, args_flat)
+      )
+      args_flat, in_tree = args_ft.vals, args_ft.tree
     else:
       hi_args_flat = []
       final_qdds = None
-      args_flat, in_tree = tree_util.tree_flatten((args, kwargs))
+      args_ft = tree_util.FlatTree.flatten((args, kwargs))
+      args_flat, in_tree = args_ft.vals, args_ft.tree
 
     # TODO(mattjj): improve wrong-number-of-args error
     if in_tree != params.in_tree:
