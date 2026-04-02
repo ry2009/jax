@@ -14,9 +14,12 @@
 
 from collections.abc import Sequence
 import importlib
+import logging
 import re
 from types import ModuleType
 import warnings
+
+logger = logging.getLogger(__name__)
 
 from .version import __version__ as jaxlib_version
 
@@ -110,7 +113,13 @@ def maybe_import_plugin_submodule(
           f"{plugin_module_name}.{submodule_name}",
           package="jaxlib",
       )
-    except ImportError:
+    except ImportError as e:
+      logger.error(
+          "Failed to import plugin submodule %s.%s: %s",
+          plugin_module_name,
+          submodule_name,
+          e,
+      )
       continue
     else:
       if not check_version:
